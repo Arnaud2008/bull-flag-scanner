@@ -29,7 +29,7 @@ ATR_BAISSE_PCT     = 20      # ATR doit avoir baisse de X% pendant la consolidat
 VOL_BAISSE_PCT     = 30      # Volume moyen doit avoir baisse de X% pendant la consolidation
 BREAKOUT_PCT       = 2.0     # Hausse minimum du jour de breakout (%)
 VOL_MULT_BREAKOUT  = 1.8     # Volume du breakout X fois la moyenne
-IMPULSION_PCT_MIN  = 10      # Hausse minimum du "mat du drapeau" (%)
+IMPULSION_PCT_MIN  = 15      # Hausse minimum du "mat du drapeau" (%)
 IMPULSION_PCT_MAX  = 60      # Hausse maximum (evite les paraboles deja epuisees)
 IMPULSION_JOURS    = 30      # Fenetre pour mesurer l impulsion
 MA20_DESSUS        = True    # Prix doit etre au-dessus de la MA20
@@ -37,7 +37,7 @@ MA50_DESSUS        = True    # Prix doit etre au-dessus de la MA50
 SCAN_NB_STOCKS     = 100     # Nombre de stocks du S&P500 a scanner (max 503)
 
 # Heure du scan (format HH:MM, heure locale de ton serveur)
-HEURE_SCAN = "09:45"  # 9h45 ET = 15 min apres ouverture du marche
+HEURE_SCAN = "13:45"  # 9h45 ET = 15 min apres ouverture du marche
 
 # ============================================================
 #  LISTE S&P 500 (top 100 par capitalisation)

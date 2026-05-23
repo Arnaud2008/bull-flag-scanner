@@ -71,9 +71,9 @@ logging.basicConfig(
 
 def calcul_atr(df, periode=14):
     """Average True Range sur N jours."""
-    high = df["High"]
-    low  = df["Low"]
-    close_prev = df["Close"].shift(1)
+   high = df["High"].squeeze()
+    low  = df["Low"].squeeze()
+    close_prev = df["Close"].squeeze().shift(1)
     tr = pd.concat([
         high - low,
         (high - close_prev).abs(),
@@ -93,6 +93,8 @@ def analyser_stock(ticker):
             return None
 
         df = df.copy()
+                for col in df.columns:
+            df[col] = df[col].squeeze()
         df["ATR"]   = calcul_atr(df)
         df["MA20"]  = df["Close"].rolling(20).mean()
         df["MA50"]  = df["Close"].rolling(50).mean()

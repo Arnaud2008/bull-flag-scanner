@@ -18,9 +18,9 @@ from datetime import datetime
 #  CONFIGURATION — MODIFIE CES VALEURS
 # ============================================================
 
-EMAIL_EXPEDITEUR  = "ton_email@gmail.com"      # Ton adresse Gmail
-EMAIL_MOT_DE_PASSE = "xxxx xxxx xxxx xxxx"     # Mot de passe d'application Gmail (16 caracteres)
-EMAIL_DESTINATAIRE = "ton_email@gmail.com"     # Ou tu veux recevoir les alertes
+EMAIL_EXPEDITEUR  = "arnaudlalancette08@gmail.com"      # Ton adresse Gmail
+EMAIL_MOT_DE_PASSE = "dkkv jsty zurf vrap"     # Mot de passe d'application Gmail (16 caracteres)
+EMAIL_DESTINATAIRE = "arnaudlalancette08@gmail.com"     # Ou tu veux recevoir les alertes
 
 # --- Criteres du setup ---
 CONSOL_JOURS_MIN   = 5       # Consolidation minimum en jours

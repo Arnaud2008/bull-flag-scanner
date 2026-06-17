@@ -1,7 +1,7 @@
 """
 Bull Flag Scanner — S&P 500 + NASDAQ 100 + Dow Jones
 Detecte : uptrend fort + consolidation + breakout avec volume
-Version 4 — Criteres assouplis + tickers delistes retires
+Version 5 — Logique consolidation corrigee + logs diagnostics
 """
 
 import yfinance as yf
@@ -98,7 +98,7 @@ NASDAQ100_EXTRA = [
 DOW30 = [
     "AAPL","AMGN","AXP","BA","CAT","CRM","CSCO","CVX","DIS","DOW",
     "GS","HD","HON","IBM","INTC","JNJ","JPM","KO","MCD","MMM",
-    "MRK","MSFT","NKE","PG","TRV","UNH","V","VZ","WBA","WMT"
+    "MRK","MSFT","NKE","PG","TRV","UNH","V","VZ","WMT","AMZN"
 ]
 
 # Deduplication
@@ -177,40 +177,68 @@ def analyser_stock(ticker):
         if ratio_vol < VOL_MULT_BREAKOUT:
             return None
 
-        # Recherche debut consolidation
+        logging.info(f"    {ticker} passe breakout+volume : +{changement_pct:.1f}% / vol {ratio_vol:.1f}x")
+
+        # -----------------------------------------------------------
+        # Recherche debut consolidation (flag)
+        # On remonte depuis avant-hier (iloc[-2]) vers le passe.
+        # On cherche LA PREMIERE bougie avec un range LARGE (>2%) :
+        # c'est la fin de l'impulsion / debut du flag.
+        # -----------------------------------------------------------
         consol_debut = None
-        for i in range(2, min(CONSOL_JOURS_MAX + 2, len(df) - 5)):
+        for i in range(2, min(CONSOL_JOURS_MAX + 2, len(df) - 10)):
             bougie    = df.iloc[-i]
             range_pct = (float(bougie["High"]) - float(bougie["Low"])) / float(bougie["Low"]) * 100
-            if range_pct > 2.0:
+            if range_pct > 1.5:   # Bougie "active" = fin de l'impulsion
                 consol_debut = -i
                 break
 
         if consol_debut is None:
             return None
 
+        # nb_jours_consol = nombre de bougies entre fin impulsion et aujourd'hui
         nb_jours_consol = abs(consol_debut) - 1
         if nb_jours_consol < CONSOL_JOURS_MIN:
+            logging.info(f"    {ticker} elimine : consolidation trop courte ({nb_jours_consol}j < {CONSOL_JOURS_MIN}j)")
             return None
 
-        zone_consol = df.iloc[consol_debut:-1]
+        # Zone de consolidation = entre consol_debut et la bougie d'hier (exclu breakout)
+        zone_consol = df.iloc[consol_debut + 1 : -1]   # BUG CORRIGE: +1 pour exclure la bougie d'impulsion elle-meme
         if len(zone_consol) < CONSOL_JOURS_MIN:
             return None
 
-        atr_avant   = float(df.iloc[consol_debut - 5 : consol_debut]["ATR"].mean())
+        # Verifier que la consolidation est "plate" — range total < 8%
+        consol_high = float(zone_consol["High"].max())
+        consol_low  = float(zone_consol["Low"].min())
+        consol_range_pct = (consol_high - consol_low) / consol_low * 100
+        if consol_range_pct > 10.0:   # Flag trop large = pas un flag
+            logging.info(f"    {ticker} elimine : flag trop large ({consol_range_pct:.1f}% > 10%)")
+            return None
+
+        # Verifier baisse ATR (volatilite) pendant la consolidation
+        atr_avant_slice = df.iloc[max(consol_debut - 5, -len(df)) : consol_debut]
+        if len(atr_avant_slice) < 2:
+            return None
+        atr_avant   = float(atr_avant_slice["ATR"].mean())
         atr_pendant = float(zone_consol["ATR"].mean())
-        if atr_avant == 0:
+        if atr_avant == 0 or pd.isna(atr_avant) or pd.isna(atr_pendant):
             return None
         baisse_atr_pct = (1 - atr_pendant / atr_avant) * 100
         if baisse_atr_pct < ATR_BAISSE_PCT:
+            logging.info(f"    {ticker} elimine : ATR pas assez baisse ({baisse_atr_pct:.1f}% < {ATR_BAISSE_PCT}%)")
             return None
 
-        vol_avant   = float(df.iloc[consol_debut - 10 : consol_debut]["Volume"].mean())
+        # Verifier baisse volume pendant la consolidation
+        vol_avant_slice = df.iloc[max(consol_debut - 10, -len(df)) : consol_debut]
+        if len(vol_avant_slice) < 3:
+            return None
+        vol_avant   = float(vol_avant_slice["Volume"].mean())
         vol_pendant = float(zone_consol["Volume"].mean())
-        if vol_avant == 0:
+        if vol_avant == 0 or pd.isna(vol_avant):
             return None
         baisse_vol_pct = (1 - vol_pendant / vol_avant) * 100
         if baisse_vol_pct < VOL_BAISSE_PCT:
+            logging.info(f"    {ticker} elimine : volume pas assez baisse ({baisse_vol_pct:.1f}% < {VOL_BAISSE_PCT}%)")
             return None
 
         debut_imp = df.iloc[max(consol_debut - IMPULSION_JOURS, -len(df)) : consol_debut]
@@ -221,6 +249,7 @@ def analyser_stock(ticker):
         prix_haut     = float(df.iloc[consol_debut]["High"])
         impulsion_pct = (prix_haut - prix_bas) / prix_bas * 100
         if not (IMPULSION_PCT_MIN <= impulsion_pct <= IMPULSION_PCT_MAX):
+            logging.info(f"    {ticker} elimine : impulsion hors range ({impulsion_pct:.1f}%, requis {IMPULSION_PCT_MIN}-{IMPULSION_PCT_MAX}%)")
             return None
 
         return {
@@ -329,5 +358,5 @@ def envoyer_email(setups, date_heure):
 # ============================================================
 
 if __name__ == "__main__":
-    logging.info("Bull Flag Scanner v4 demarre.")
+    logging.info("Bull Flag Scanner v5 demarre.")
     lancer_scan()

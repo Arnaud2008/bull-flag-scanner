@@ -1,7 +1,7 @@
 """
 Bull Flag Scanner — S&P 500 + NASDAQ 100 + Dow Jones
 Detecte : uptrend fort + consolidation + breakout avec volume
-Version 5 — Logique consolidation corrigee + logs diagnostics
+Version 6 — Detection consolidation entierement reconstruite
 """
 
 import yfinance as yf
@@ -180,43 +180,65 @@ def analyser_stock(ticker):
         logging.info(f"    {ticker} passe breakout+volume : +{changement_pct:.1f}% / vol {ratio_vol:.1f}x")
 
         # -----------------------------------------------------------
-        # Recherche debut consolidation (flag)
-        # On remonte depuis avant-hier (iloc[-2]) vers le passe.
-        # On cherche LA PREMIERE bougie avec un range LARGE (>2%) :
-        # c'est la fin de l'impulsion / debut du flag.
+        # Recherche du flag (consolidation) et du flag pole (impulsion)
+        #
+        # Logique corrigee :
+        #   - iloc[-1] = aujourd'hui = breakout
+        #   - On remonte depuis iloc[-2] (hier) vers le passe
+        #   - Les bougies avec petit range = zone de consolidation (flag)
+        #   - La premiere bougie a GRAND range qu'on trouve en remontant
+        #     = fin du flag pole = debut de la consolidation
+        #
+        # Un "petit range" = bougie calme <= 2.5% de range
+        # Un "grand range" = bougie forte > 2.5% = fin de l'impulsion
         # -----------------------------------------------------------
-        consol_debut = None
-        for i in range(2, min(CONSOL_JOURS_MAX + 2, len(df) - 10)):
+
+        SEUIL_RANGE_ACTIF = 2.5   # % de range pour distinguer impulsion vs consolidation
+
+        # Compter les jours de consolidation consecutifs depuis hier
+        nb_jours_consol = 0
+        consol_debut_idx = None   # index absolu dans df
+
+        for i in range(2, min(CONSOL_JOURS_MAX + 3, len(df) - 5)):
             bougie    = df.iloc[-i]
             range_pct = (float(bougie["High"]) - float(bougie["Low"])) / float(bougie["Low"]) * 100
-            if range_pct > 1.5:   # Bougie "active" = fin de l'impulsion
-                consol_debut = -i
-                break
 
-        if consol_debut is None:
-            return None
+            if range_pct <= SEUIL_RANGE_ACTIF:
+                # Bougie calme = fait partie du flag
+                nb_jours_consol += 1
+                consol_debut_idx = -i
+            else:
+                # Bougie active = on a trouve la fin du flag pole
+                # On s'arrete seulement si on a deja au moins quelques jours de consol
+                if nb_jours_consol >= 2:
+                    consol_debut_idx = -(i - 1)   # La derniere bougie calme avant celle-ci
+                    break
+                else:
+                    # Pas encore assez de consolidation, reset et continue
+                    nb_jours_consol = 0
+                    consol_debut_idx = None
 
-        # nb_jours_consol = nombre de bougies entre fin impulsion et aujourd'hui
-        nb_jours_consol = abs(consol_debut) - 1
-        if nb_jours_consol < CONSOL_JOURS_MIN:
+        if consol_debut_idx is None or nb_jours_consol < CONSOL_JOURS_MIN:
             logging.info(f"    {ticker} elimine : consolidation trop courte ({nb_jours_consol}j < {CONSOL_JOURS_MIN}j)")
             return None
 
-        # Zone de consolidation = entre consol_debut et la bougie d'hier (exclu breakout)
-        zone_consol = df.iloc[consol_debut + 1 : -1]   # BUG CORRIGE: +1 pour exclure la bougie d'impulsion elle-meme
+        # Zone de consolidation
+        zone_consol = df.iloc[consol_debut_idx:-1]
         if len(zone_consol) < CONSOL_JOURS_MIN:
             return None
 
-        # Verifier que la consolidation est "plate" — range total < 8%
+        # Verifier que le flag est "plat" — range total < 12%
         consol_high = float(zone_consol["High"].max())
         consol_low  = float(zone_consol["Low"].min())
         consol_range_pct = (consol_high - consol_low) / consol_low * 100
-        if consol_range_pct > 10.0:   # Flag trop large = pas un flag
-            logging.info(f"    {ticker} elimine : flag trop large ({consol_range_pct:.1f}% > 10%)")
+        if consol_range_pct > 12.0:
+            logging.info(f"    {ticker} elimine : flag trop large ({consol_range_pct:.1f}% > 12%)")
             return None
 
+        logging.info(f"    {ticker} flag OK : {nb_jours_consol}j de consol, range {consol_range_pct:.1f}%")
+
         # Verifier baisse ATR (volatilite) pendant la consolidation
-        atr_avant_slice = df.iloc[max(consol_debut - 5, -len(df)) : consol_debut]
+        atr_avant_slice = df.iloc[max(consol_debut_idx - 5, -len(df)) : consol_debut_idx]
         if len(atr_avant_slice) < 2:
             return None
         atr_avant   = float(atr_avant_slice["ATR"].mean())
@@ -229,7 +251,7 @@ def analyser_stock(ticker):
             return None
 
         # Verifier baisse volume pendant la consolidation
-        vol_avant_slice = df.iloc[max(consol_debut - 10, -len(df)) : consol_debut]
+        vol_avant_slice = df.iloc[max(consol_debut_idx - 10, -len(df)) : consol_debut_idx]
         if len(vol_avant_slice) < 3:
             return None
         vol_avant   = float(vol_avant_slice["Volume"].mean())
@@ -241,12 +263,12 @@ def analyser_stock(ticker):
             logging.info(f"    {ticker} elimine : volume pas assez baisse ({baisse_vol_pct:.1f}% < {VOL_BAISSE_PCT}%)")
             return None
 
-        debut_imp = df.iloc[max(consol_debut - IMPULSION_JOURS, -len(df)) : consol_debut]
+        debut_imp = df.iloc[max(consol_debut_idx - IMPULSION_JOURS, -len(df)) : consol_debut_idx]
         if len(debut_imp) < 5:
             return None
 
         prix_bas      = float(debut_imp["Low"].min())
-        prix_haut     = float(df.iloc[consol_debut]["High"])
+        prix_haut     = float(df.iloc[consol_debut_idx]["High"])
         impulsion_pct = (prix_haut - prix_bas) / prix_bas * 100
         if not (IMPULSION_PCT_MIN <= impulsion_pct <= IMPULSION_PCT_MAX):
             logging.info(f"    {ticker} elimine : impulsion hors range ({impulsion_pct:.1f}%, requis {IMPULSION_PCT_MIN}-{IMPULSION_PCT_MAX}%)")
@@ -358,5 +380,5 @@ def envoyer_email(setups, date_heure):
 # ============================================================
 
 if __name__ == "__main__":
-    logging.info("Bull Flag Scanner v5 demarre.")
+    logging.info("Bull Flag Scanner v6 demarre.")
     lancer_scan()

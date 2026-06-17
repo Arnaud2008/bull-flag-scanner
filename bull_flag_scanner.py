@@ -1,7 +1,7 @@
 """
 Bull Flag Scanner — S&P 500 + NASDAQ 100 + Dow Jones
 Detecte : uptrend fort + consolidation + breakout avec volume
-Version 3 — GitHub Actions compatible
+Version 4 — Criteres assouplis + tickers delistes retires
 """
 
 import yfinance as yf
@@ -23,17 +23,18 @@ EMAIL_MOT_DE_PASSE = os.environ.get("EMAIL_MOT_DE_PASSE", "")
 EMAIL_DESTINATAIRE = os.environ.get("EMAIL_DESTINATAIRE", "arnaudlalancette08@gmail.com")
 
 # --- Criteres du setup ---
-CONSOL_JOURS_MIN   = 5
-CONSOL_JOURS_MAX   = 30
-ATR_BAISSE_PCT     = 20
-VOL_BAISSE_PCT     = 30
-BREAKOUT_PCT       = 2.0
-VOL_MULT_BREAKOUT  = 1.8
-IMPULSION_PCT_MIN  = 15
-IMPULSION_PCT_MAX  = 60
-IMPULSION_JOURS    = 30
-MA20_DESSUS        = True
-MA50_DESSUS        = True
+# (v4 : assouplis pour capturer plus de vrais bull flags)
+CONSOL_JOURS_MIN   = 4      # Avant: 5  — quelques flags forment vite
+CONSOL_JOURS_MAX   = 40     # Avant: 30 — flags plus longs aussi valides
+ATR_BAISSE_PCT     = 15     # Avant: 20 — baisse de volatilite moins stricte
+VOL_BAISSE_PCT     = 20     # Avant: 30 — baisse de volume moins stricte
+BREAKOUT_PCT       = 1.0    # Avant: 2.0 — les grosses caps cassent souvent avec +1%
+VOL_MULT_BREAKOUT  = 1.5    # Avant: 1.8 — grosses caps ont moins de spikes de volume
+IMPULSION_PCT_MIN  = 8      # Avant: 15 — 8% sur AAPL = mouvement tres fort
+IMPULSION_PCT_MAX  = 100    # Avant: 60 — inclut les breakouts explosifs
+IMPULSION_JOURS    = 45     # Avant: 30 — flag pole peut se former plus lentement
+MA20_DESSUS        = True   # Garder — filtre les downtrends
+MA50_DESSUS        = False  # Avant: True — assoupli, permet les rebounds
 
 # ============================================================
 #  LISTE COMPLETE : S&P 500 + NASDAQ 100 + DOW JONES
@@ -46,7 +47,7 @@ SP500 = [
     "AAL","AEP","AXP","AIG","AMT","AWK","AMP","AME","AMGN","APH","ADI","ANSS","AON",
     "APA","AAPL","AMAT","APTV","ACGL","ADM","ANET","AJG","AIZ","T","ATO","ADSK","AZO",
     "AVB","AVY","AXON","BKR","BALL","BAC","BBWI","BAX","BDX","WRB","BRK-B","BBY",
-    "BIO","TECH","BIIB","BLK","BX","BA","BCR","BMY","AVGO","BR","BRO","BF-B","BLDR",
+    "BIO","TECH","BIIB","BLK","BX","BA","BMY","AVGO","BR","BRO","BF-B","BLDR",
     "BSX","CHRW","CDNS","CZR","CPT","CPB","COF","CAH","KMX","CCL","CARR","CTLT","CAT",
     "CBOE","CBRE","CDW","CE","COR","CNC","CNP","CF","CRL","SCHW","CHTR","CVX","CMG",
     "CB","CHD","CI","CINF","CTAS","CSCO","C","CFG","CLX","CME","CMS","KO","CTSH",
@@ -54,7 +55,7 @@ SP500 = [
     "COST","CTRA","CRWD","CCI","CSX","CMI","CVS","DHR","DRI","DVA","DAY","DECK","DE",
     "DAL","DVN","DXCM","FANG","DLR","DFS","DG","DLTR","D","DPZ","DOV","DOW","DHI",
     "DTE","DUK","DD","EMN","ETN","EBAY","ECL","EIX","EW","EA","ELV","EMR","ENPH",
-    "ETR","EOG","EPAM","EQT","EFX","EQIX","EQR","ESS","EL","ETSY","EG","EVRST","ES",
+    "ETR","EOG","EPAM","EQT","EFX","EQIX","EQR","ESS","EL","ETSY","EG","ES",
     "EXC","EXPE","EXPD","EXR","XOM","FFIV","FDS","FICO","FAST","FRT","FDX","FIS",
     "FITB","FSLR","FE","FI","FLT","FMC","F","FTNT","FTV","FOXA","FOX","BEN","FCX",
     "GRMN","IT","GE","GEHC","GEV","GEN","GNRC","GD","GIS","GM","GPC","GILD","GPN",
@@ -78,18 +79,18 @@ SP500 = [
     "TFX","TER","TSLA","TXN","TXT","TMO","TJX","TSCO","TT","TDG","TRV","TRMB","TFC",
     "TYL","TSN","USB","UBER","UDR","ULTA","UNP","UAL","UPS","URI","UNH","UHS","VLO",
     "VTR","VLTO","VRSN","VRSK","VZ","VRTX","VTRS","VICI","V","VST","VMC","WRK","WAB",
-    "WMT","WBA","WM","WAT","WEC","WFC","WELL","WST","WDC","WY","WHR","WMB","WTW","GWW",
+    "WMT","WM","WAT","WEC","WFC","WELL","WST","WDC","WY","WHR","WMB","WTW","GWW",
     "WYNN","XEL","XYL","YUM","ZBRA","ZBH","ZTS"
 ]
 
 NASDAQ100_EXTRA = [
     "ADSK","AEP","AMAT","AMD","AMGN","ANSS","ASML","BKNG","CDNS","CDW","CEG",
     "CHTR","CPRT","CSGP","CSCO","CTAS","CTSH","DDOG","DLTR","DXCM","EA","ENPH",
-    "EXC","FAST","FTNT","GEHC","GFS","HON","IDXX","ILMN","INTC","INTU","ISRG",
+    "EXC","FAST","FTNT","GEHC","GFS","HON","IDXX","INTC","INTU","ISRG",
     "KDP","KLAC","LRCX","LULU","MAR","MCHP","MDLZ","MELI","MNST","MRNA","MSFT",
     "MU","NFLX","NXPI","ODFL","ON","ORLY","PANW","PAYX","PCAR","PDD","PEP",
-    "QCOM","REGN","ROST","SBUX","SGEN","SNPS","TEAM","TMUS","TSLA","TXN","VRSK",
-    "VRTX","WBD","WBA","WDAY","XEL","ZS","ZM","OKTA","CRWD","DDOG","NET","SNOW",
+    "QCOM","REGN","ROST","SBUX","SNPS","TEAM","TMUS","TSLA","TXN","VRSK",
+    "VRTX","WBD","WDAY","XEL","ZS","ZM","OKTA","CRWD","DDOG","NET","SNOW",
     "PLTR","RBLX","COIN","HOOD","AFRM","UPST","SOFI","RIVN","LCID","NIO","XPEV",
     "LI","GRAB","SEA","BIDU","JD","PDD","TCOM","BILI"
 ]
@@ -236,7 +237,10 @@ def analyser_stock(ticker):
         }
 
     except Exception as e:
-        logging.warning(f"{ticker} — erreur : {e}")
+        # Supprime les erreurs de tickers delistes pour garder les logs propres
+        msg = str(e)
+        if "delisted" not in msg.lower() and "no data found" not in msg.lower():
+            logging.warning(f"{ticker} — erreur : {e}")
         return None
 
 
@@ -325,5 +329,5 @@ def envoyer_email(setups, date_heure):
 # ============================================================
 
 if __name__ == "__main__":
-    logging.info("Bull Flag Scanner v3 demarre.")
+    logging.info("Bull Flag Scanner v4 demarre.")
     lancer_scan()

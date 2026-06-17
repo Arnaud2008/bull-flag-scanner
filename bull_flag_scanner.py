@@ -1,27 +1,26 @@
 """
-Bull Flag Scanner — S&P 500
+Bull Flag Scanner — S&P 500 + NASDAQ 100 + Dow Jones
 Detecte : uptrend fort + consolidation + breakout avec volume
-Version 2 — compatible yfinance recent
+Version 3 — GitHub Actions compatible
 """
 
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import smtplib
-import schedule
-import time
 import logging
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
 # ============================================================
-#  CONFIGURATION — MODIFIE CES VALEURS
+#  CONFIGURATION — Variables d'environnement (GitHub Secrets)
 # ============================================================
 
-EMAIL_EXPEDITEUR   = "arnaudlalancette08@gmail.com"
-EMAIL_MOT_DE_PASSE = "dkkv jsty zurf vrap"
-EMAIL_DESTINATAIRE = "arnaudlalancette08@gmail.com"
+EMAIL_EXPEDITEUR   = os.environ.get("EMAIL_EXPEDITEUR", "arnaudlalancette08@gmail.com")
+EMAIL_MOT_DE_PASSE = os.environ.get("EMAIL_MOT_DE_PASSE", "")
+EMAIL_DESTINATAIRE = os.environ.get("EMAIL_DESTINATAIRE", "arnaudlalancette08@gmail.com")
 
 # --- Criteres du setup ---
 CONSOL_JOURS_MIN   = 5
@@ -35,25 +34,74 @@ IMPULSION_PCT_MAX  = 60
 IMPULSION_JOURS    = 30
 MA20_DESSUS        = True
 MA50_DESSUS        = True
-SCAN_NB_STOCKS     = 100
-HEURE_SCAN         = "13:45"
 
 # ============================================================
-#  LISTE S&P 500
+#  LISTE COMPLETE : S&P 500 + NASDAQ 100 + DOW JONES
+#  (~550 tickers uniques apres deduplication)
 # ============================================================
 
 SP500 = [
-    "AAPL","MSFT","NVDA","AMZN","GOOGL","META","TSLA","BRK-B","UNH","JPM",
-    "V","XOM","PG","JNJ","MA","HD","CVX","MRK","ABBV","LLY",
-    "AVGO","PEP","KO","COST","TMO","MCD","CSCO","WMT","ABT","ACN",
-    "CRM","DIS","NFLX","ADBE","TXN","NEE","QCOM","NKE","MDT","BMY",
-    "AMGN","LIN","UPS","HON","LOW","GS","PM","SBUX","INTU","AXP",
-    "IBM","RTX","CAT","GE","SPGI","BLK","ISRG","GILD","DE","MDLZ",
-    "ADI","PLD","MMC","SYK","MU","REGN","ZTS","CI","SO","TJX",
-    "DUK","AON","CME","SHW","PYPL","ICE","CL","EQIX","NOC","PGR",
-    "ETN","APD","MCO","ORLY","KLAC","HCA","ELV","F","GM","USB",
-    "PANW","CRWD","SNOW","DDOG","ANET","MELI","SHOP","SQ","COIN","ROKU"
+    "MMM","AOS","ABT","ABBV","ACN","ADBE","AMD","AES","AFL","A","APD","ABNB","AKAM",
+    "ALB","ARE","ALGN","ALLE","LNT","ALL","GOOGL","GOOG","MO","AMZN","AMCR","AEE",
+    "AAL","AEP","AXP","AIG","AMT","AWK","AMP","AME","AMGN","APH","ADI","ANSS","AON",
+    "APA","AAPL","AMAT","APTV","ACGL","ADM","ANET","AJG","AIZ","T","ATO","ADSK","AZO",
+    "AVB","AVY","AXON","BKR","BALL","BAC","BBWI","BAX","BDX","WRB","BRK-B","BBY",
+    "BIO","TECH","BIIB","BLK","BX","BA","BCR","BMY","AVGO","BR","BRO","BF-B","BLDR",
+    "BSX","CHRW","CDNS","CZR","CPT","CPB","COF","CAH","KMX","CCL","CARR","CTLT","CAT",
+    "CBOE","CBRE","CDW","CE","COR","CNC","CNP","CF","CRL","SCHW","CHTR","CVX","CMG",
+    "CB","CHD","CI","CINF","CTAS","CSCO","C","CFG","CLX","CME","CMS","KO","CTSH",
+    "CL","CMCSA","CAG","COP","ED","STZ","CEG","COO","CPRT","GLW","CPAY","CTVA","CSGP",
+    "COST","CTRA","CRWD","CCI","CSX","CMI","CVS","DHR","DRI","DVA","DAY","DECK","DE",
+    "DAL","DVN","DXCM","FANG","DLR","DFS","DG","DLTR","D","DPZ","DOV","DOW","DHI",
+    "DTE","DUK","DD","EMN","ETN","EBAY","ECL","EIX","EW","EA","ELV","EMR","ENPH",
+    "ETR","EOG","EPAM","EQT","EFX","EQIX","EQR","ESS","EL","ETSY","EG","EVRST","ES",
+    "EXC","EXPE","EXPD","EXR","XOM","FFIV","FDS","FICO","FAST","FRT","FDX","FIS",
+    "FITB","FSLR","FE","FI","FLT","FMC","F","FTNT","FTV","FOXA","FOX","BEN","FCX",
+    "GRMN","IT","GE","GEHC","GEV","GEN","GNRC","GD","GIS","GM","GPC","GILD","GPN",
+    "GL","GDDY","GS","HAL","HIG","HAS","HCA","DOC","HSIC","HSY","HES","HPE","HLT",
+    "HOLX","HD","HON","HRL","HST","HWM","HPQ","HUBB","HUM","HBAN","HII","IBM","IEX",
+    "IDXX","ITW","INCY","IR","PODD","INTC","ICE","IFF","IP","IPG","INTU","ISRG","IVZ",
+    "INVH","IQV","IRM","JBHT","JBL","JKHY","J","JNJ","JCI","JPM","JNPR","K","KVUE",
+    "KDP","KEY","KEYS","KMB","KIM","KMI","KLAC","KHC","KR","LHX","LH","LRCX","LW",
+    "LVS","LDOS","LEN","LLY","LIN","LYV","LKQ","LMT","L","LOW","LULU","LYB","MTB",
+    "MRO","MPC","MKTX","MAR","MMC","MLM","MAS","MA","MTCH","MKC","MCD","MCK","MDT",
+    "MRK","META","MET","MTD","MGM","MCHP","MU","MSFT","MAA","MRNA","MHK","MOH","TAP",
+    "MDLZ","MPWR","MNST","MCO","MS","MOS","MSI","MSCI","NDAQ","NTAP","NFLX","NEM",
+    "NWSA","NWS","NEE","NKE","NI","NDSN","NSC","NTRS","NOC","NCLH","NRG","NUE","NVDA",
+    "NVR","NXPI","ORLY","OXY","ODFL","OMC","ON","OKE","ORCL","OTIS","PCAR","PKG","PANW",
+    "PH","PAYX","PAYC","PYPL","PNR","PEP","PFE","PCG","PM","PSX","PNW","PNC","POOL",
+    "PPG","PPL","PFG","PG","PGR","PLD","PRU","PEG","PTC","PSA","PHM","QRVO","PWR",
+    "QCOM","DGX","RL","RJF","RTX","O","REG","REGN","RF","RSG","RMD","RVTY","ROK",
+    "ROL","ROP","ROST","RCL","SPGI","CRM","SBAC","SLB","STX","SRE","NOW","SHW","SPG",
+    "SWKS","SJM","SW","SNA","SOLV","SO","LUV","SWK","SBUX","STT","STLD","STE","SYK",
+    "SMCI","SYF","SNPS","SYY","TMUS","TROW","TTWO","TPR","TRGP","TGT","TEL","TDY",
+    "TFX","TER","TSLA","TXN","TXT","TMO","TJX","TSCO","TT","TDG","TRV","TRMB","TFC",
+    "TYL","TSN","USB","UBER","UDR","ULTA","UNP","UAL","UPS","URI","UNH","UHS","VLO",
+    "VTR","VLTO","VRSN","VRSK","VZ","VRTX","VTRS","VICI","V","VST","VMC","WRK","WAB",
+    "WMT","WBA","WM","WAT","WEC","WFC","WELL","WST","WDC","WY","WHR","WMB","WTW","GWW",
+    "WYNN","XEL","XYL","YUM","ZBRA","ZBH","ZTS"
 ]
+
+NASDAQ100_EXTRA = [
+    "ADSK","AEP","AMAT","AMD","AMGN","ANSS","ASML","BKNG","CDNS","CDW","CEG",
+    "CHTR","CPRT","CSGP","CSCO","CTAS","CTSH","DDOG","DLTR","DXCM","EA","ENPH",
+    "EXC","FAST","FTNT","GEHC","GFS","HON","IDXX","ILMN","INTC","INTU","ISRG",
+    "KDP","KLAC","LRCX","LULU","MAR","MCHP","MDLZ","MELI","MNST","MRNA","MSFT",
+    "MU","NFLX","NXPI","ODFL","ON","ORLY","PANW","PAYX","PCAR","PDD","PEP",
+    "QCOM","REGN","ROST","SBUX","SGEN","SNPS","TEAM","TMUS","TSLA","TXN","VRSK",
+    "VRTX","WBD","WBA","WDAY","XEL","ZS","ZM","OKTA","CRWD","DDOG","NET","SNOW",
+    "PLTR","RBLX","COIN","HOOD","AFRM","UPST","SOFI","RIVN","LCID","NIO","XPEV",
+    "LI","GRAB","SEA","BIDU","JD","PDD","TCOM","BILI"
+]
+
+DOW30 = [
+    "AAPL","AMGN","AXP","BA","CAT","CRM","CSCO","CVX","DIS","DOW",
+    "GS","HD","HON","IBM","INTC","JNJ","JPM","KO","MCD","MMM",
+    "MRK","MSFT","NKE","PG","TRV","UNH","V","VZ","WBA","WMT"
+]
+
+# Deduplication
+TOUS_TICKERS = list(dict.fromkeys(SP500 + NASDAQ100_EXTRA + DOW30))
 
 # ============================================================
 #  LOGGING
@@ -62,10 +110,7 @@ SP500 = [
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)s  %(message)s",
-    handlers=[
-        logging.FileHandler("scanner.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 
 # ============================================================
@@ -73,7 +118,6 @@ logging.basicConfig(
 # ============================================================
 
 def nettoyer_serie(s):
-    """Convertit une Series ou DataFrame colonne en Series 1D propre."""
     if isinstance(s, pd.DataFrame):
         s = s.iloc[:, 0]
     return pd.Series(s.values.flatten(), index=s.index, dtype=float)
@@ -98,7 +142,6 @@ def analyser_stock(ticker):
         if raw is None or len(raw) < 60:
             return None
 
-        # Aplatir les colonnes multi-index si present
         df = pd.DataFrame()
         for col in ["Open", "High", "Low", "Close", "Volume"]:
             if col in raw.columns:
@@ -173,8 +216,8 @@ def analyser_stock(ticker):
         if len(debut_imp) < 5:
             return None
 
-        prix_bas   = float(debut_imp["Low"].min())
-        prix_haut  = float(df.iloc[consol_debut]["High"])
+        prix_bas      = float(debut_imp["Low"].min())
+        prix_haut     = float(df.iloc[consol_debut]["High"])
         impulsion_pct = (prix_haut - prix_bas) / prix_bas * 100
         if not (IMPULSION_PCT_MIN <= impulsion_pct <= IMPULSION_PCT_MAX):
             return None
@@ -200,24 +243,23 @@ def analyser_stock(ticker):
 def lancer_scan():
     date_heure = datetime.now().strftime("%Y-%m-%d %H:%M")
     logging.info(f"=== Debut du scan — {date_heure} ===")
+    logging.info(f"Nombre de tickers a analyser : {len(TOUS_TICKERS)}")
 
-    tickers = SP500[:SCAN_NB_STOCKS]
-    setups  = []
+    setups = []
 
-    for i, ticker in enumerate(tickers, 1):
-        logging.info(f"  Analyse {ticker} ({i}/{len(tickers)})...")
+    for i, ticker in enumerate(TOUS_TICKERS, 1):
+        logging.info(f"  [{i}/{len(TOUS_TICKERS)}] {ticker}...")
         resultat = analyser_stock(ticker)
         if resultat:
             setups.append(resultat)
-            logging.info(f"  SETUP TROUVE : {ticker}")
-        time.sleep(0.4)
+            logging.info(f"  *** SETUP TROUVE : {ticker} ***")
 
     logging.info(f"=== Fin du scan — {len(setups)} setup(s) trouves ===")
 
     if setups:
         envoyer_email(setups, date_heure)
     else:
-        logging.info("Aucun setup — pas d email envoye.")
+        logging.info("Aucun setup — pas d'email envoye.")
 
 
 def envoyer_email(setups, date_heure):
@@ -240,7 +282,7 @@ def envoyer_email(setups, date_heure):
     corps = f"""
     <html><body style="font-family:Arial,sans-serif;max-width:900px;margin:auto">
     <h2 style="color:#534AB7">Bull Flag Scanner — {date_heure}</h2>
-    <p><strong>{len(setups)} setup(s)</strong> detecte(s) sur le S&P 500</p>
+    <p><strong>{len(setups)} setup(s)</strong> detecte(s) sur S&P 500 + NASDAQ 100 + Dow Jones</p>
     <table border="0" cellspacing="0" cellpadding="0"
            style="border-collapse:collapse;width:100%;font-size:14px">
       <thead>
@@ -279,17 +321,9 @@ def envoyer_email(setups, date_heure):
 
 
 # ============================================================
-#  LANCEMENT
+#  POINT D'ENTREE
 # ============================================================
 
 if __name__ == "__main__":
-    logging.info("Bull Flag Scanner v2 demarre.")
-    logging.info(f"Scan programme tous les jours a {HEURE_SCAN} UTC.")
-
+    logging.info("Bull Flag Scanner v3 demarre.")
     lancer_scan()
-
-    schedule.every().day.at(HEURE_SCAN).do(lancer_scan)
-
-    while True:
-        schedule.run_pending()
-        time.sleep(30)

@@ -1,7 +1,7 @@
 """
 Bull Flag Scanner — S&P 500 + NASDAQ 100 + Dow Jones
 Detecte : uptrend fort + consolidation + breakout avec volume
-Version 6 — Detection consolidation entierement reconstruite
+Version 7 — Detection flag par fenetre glissante sur prix
 """
 
 import yfinance as yf
@@ -53,8 +53,7 @@ SP500 = [
     "CB","CHD","CI","CINF","CTAS","CSCO","C","CFG","CLX","CME","CMS","KO","CTSH",
     "CL","CMCSA","CAG","COP","ED","STZ","CEG","COO","CPRT","GLW","CPAY","CTVA","CSGP",
     "COST","CTRA","CRWD","CCI","CSX","CMI","CVS","DHR","DRI","DVA","DAY","DECK","DE",
-    "DAL","DVN","DXCM","FANG","DLR","DFS","DG","DLTR","D","DPZ","DOV","DOW","DHI",
-    "DTE","DUK","DD","EMN","ETN","EBAY","ECL","EIX","EW","EA","ELV","EMR","ENPH",
+    "DAL","DVN","DXCM","FANG","DLR","DFS","DG","DLTR","D","DPZ","DOV","DOW","DHI",    "DTE","DUK","DD","EMN","ETN","EBAY","ECL","EIX","EW","EA","ELV","EMR","ENPH",
     "ETR","EOG","EPAM","EQT","EFX","EQIX","EQR","ESS","EL","ETSY","EG","ES",
     "EXC","EXPE","EXPD","EXR","XOM","FFIV","FDS","FICO","FAST","FRT","FDX","FIS",
     "FITB","FSLR","FE","FI","FLT","FMC","F","FTNT","FTV","FOXA","FOX","BEN","FCX",
@@ -78,7 +77,7 @@ SP500 = [
     "SMCI","SYF","SNPS","SYY","TMUS","TROW","TTWO","TPR","TRGP","TGT","TEL","TDY",
     "TFX","TER","TSLA","TXN","TXT","TMO","TJX","TSCO","TT","TDG","TRV","TRMB","TFC",
     "TYL","TSN","USB","UBER","UDR","ULTA","UNP","UAL","UPS","URI","UNH","UHS","VLO",
-    "VTR","VLTO","VRSN","VRSK","VZ","VRTX","VTRS","VICI","V","VST","VMC","WRK","WAB",
+    "VTR","VLTO","VRSN","VRSK","VZ","VRTX","VTRS","VICI","V","VST","VMC","WAB",
     "WMT","WM","WAT","WEC","WFC","WELL","WST","WDC","WY","WHR","WMB","WTW","GWW",
     "WYNN","XEL","XYL","YUM","ZBRA","ZBH","ZTS"
 ]
@@ -180,88 +179,99 @@ def analyser_stock(ticker):
         logging.info(f"    {ticker} passe breakout+volume : +{changement_pct:.1f}% / vol {ratio_vol:.1f}x")
 
         # -----------------------------------------------------------
-        # Recherche du flag (consolidation) et du flag pole (impulsion)
+        # DETECTION DU FLAG — Approche par prix (plus robuste)
         #
-        # Logique corrigee :
-        #   - iloc[-1] = aujourd'hui = breakout
-        #   - On remonte depuis iloc[-2] (hier) vers le passe
-        #   - Les bougies avec petit range = zone de consolidation (flag)
-        #   - La premiere bougie a GRAND range qu'on trouve en remontant
-        #     = fin du flag pole = debut de la consolidation
+        # Principe : on cherche une fenetre de N jours AVANT aujourd'hui
+        # ou le prix s'est consolide dans un range etroit (flag plat).
         #
-        # Un "petit range" = bougie calme <= 2.5% de range
-        # Un "grand range" = bougie forte > 2.5% = fin de l'impulsion
+        # On teste toutes les fenetres de 4 a CONSOL_JOURS_MAX jours
+        # en partant d'hier vers le passe, et on garde la meilleure.
         # -----------------------------------------------------------
 
-        SEUIL_RANGE_ACTIF = 2.5   # % de range pour distinguer impulsion vs consolidation
+        meilleure_consol = None
 
-        # Compter les jours de consolidation consecutifs depuis hier
-        nb_jours_consol = 0
-        consol_debut_idx = None   # index absolu dans df
+        # Tester des fenetres de consolidation de longueur variable
+        for duree in range(CONSOL_JOURS_MIN, min(CONSOL_JOURS_MAX + 1, len(df) - 15)):
+            # La fenetre se termine a iloc[-2] (hier, avant le breakout)
+            fin   = len(df) - 2          # index hier
+            debut = fin - duree          # index debut de la fenetre
 
-        for i in range(2, min(CONSOL_JOURS_MAX + 3, len(df) - 5)):
-            bougie    = df.iloc[-i]
-            range_pct = (float(bougie["High"]) - float(bougie["Low"])) / float(bougie["Low"]) * 100
+            if debut < 10:
+                break
 
-            if range_pct <= SEUIL_RANGE_ACTIF:
-                # Bougie calme = fait partie du flag
-                nb_jours_consol += 1
-                consol_debut_idx = -i
+            zone = df.iloc[debut:fin]
+            if len(zone) < CONSOL_JOURS_MIN:
+                continue
+
+            z_high = float(zone["High"].max())
+            z_low  = float(zone["Low"].min())
+            if z_low == 0:
+                continue
+
+            # Range total de la zone en %
+            z_range_pct = (z_high - z_low) / z_low * 100
+
+            # Un bon flag = range < 10% (consolidation serree)
+            if z_range_pct > 12.0:
+                continue
+
+            # Verifier baisse ATR vs les 10 jours AVANT la zone
+            avant = df.iloc[max(debut - 10, 0) : debut]
+            if len(avant) < 3:
+                continue
+            atr_avant   = float(avant["ATR"].mean())
+            atr_pendant = float(zone["ATR"].mean())
+            if atr_avant == 0 or pd.isna(atr_avant) or pd.isna(atr_pendant):
+                continue
+            baisse_atr = (1 - atr_pendant / atr_avant) * 100
+
+            # Verifier baisse volume
+            vol_avant   = float(avant["Volume"].mean())
+            vol_pendant = float(zone["Volume"].mean())
+            if vol_avant == 0:
+                continue
+            baisse_vol = (1 - vol_pendant / vol_avant) * 100
+
+            # Garder si les criteres sont remplis
+            if baisse_atr >= ATR_BAISSE_PCT and baisse_vol >= VOL_BAISSE_PCT:
+                meilleure_consol = {
+                    "duree"      : duree,
+                    "range_pct"  : z_range_pct,
+                    "baisse_atr" : baisse_atr,
+                    "baisse_vol" : baisse_vol,
+                    "debut_idx"  : debut,
+                    "zone"       : zone,
+                }
+                break   # On prend la plus courte fenetre valide
+
+        if meilleure_consol is None:
+            # Log pour comprendre pourquoi — tester la fenetre de 5j par defaut
+            fin   = len(df) - 2
+            debut = fin - 5
+            zone5 = df.iloc[debut:fin]
+            z_h = float(zone5["High"].max())
+            z_l = float(zone5["Low"].min())
+            z_r = (z_h - z_l) / z_l * 100 if z_l > 0 else 0
+            avant5 = df.iloc[max(debut - 10, 0) : debut]
+            if len(avant5) >= 3:
+                a_atr = float(avant5["ATR"].mean())
+                p_atr = float(zone5["ATR"].mean())
+                b_atr = (1 - p_atr / a_atr) * 100 if a_atr > 0 else 0
+                a_vol = float(avant5["Volume"].mean())
+                p_vol = float(zone5["Volume"].mean())
+                b_vol = (1 - p_vol / a_vol) * 100 if a_vol > 0 else 0
+                logging.info(f"    {ticker} elimine : meilleure fenetre 5j — range={z_r:.1f}% atr_baisse={b_atr:.1f}% vol_baisse={b_vol:.1f}%")
             else:
-                # Bougie active = on a trouve la fin du flag pole
-                # On s'arrete seulement si on a deja au moins quelques jours de consol
-                if nb_jours_consol >= 2:
-                    consol_debut_idx = -(i - 1)   # La derniere bougie calme avant celle-ci
-                    break
-                else:
-                    # Pas encore assez de consolidation, reset et continue
-                    nb_jours_consol = 0
-                    consol_debut_idx = None
-
-        if consol_debut_idx is None or nb_jours_consol < CONSOL_JOURS_MIN:
-            logging.info(f"    {ticker} elimine : consolidation trop courte ({nb_jours_consol}j < {CONSOL_JOURS_MIN}j)")
+                logging.info(f"    {ticker} elimine : pas de consolidation valide trouvee")
             return None
 
-        # Zone de consolidation
-        zone_consol = df.iloc[consol_debut_idx:-1]
-        if len(zone_consol) < CONSOL_JOURS_MIN:
-            return None
+        nb_jours_consol = meilleure_consol["duree"]
+        zone_consol     = meilleure_consol["zone"]
+        consol_debut_idx = meilleure_consol["debut_idx"]
+        baisse_atr_pct  = meilleure_consol["baisse_atr"]
+        baisse_vol_pct  = meilleure_consol["baisse_vol"]
 
-        # Verifier que le flag est "plat" — range total < 12%
-        consol_high = float(zone_consol["High"].max())
-        consol_low  = float(zone_consol["Low"].min())
-        consol_range_pct = (consol_high - consol_low) / consol_low * 100
-        if consol_range_pct > 12.0:
-            logging.info(f"    {ticker} elimine : flag trop large ({consol_range_pct:.1f}% > 12%)")
-            return None
-
-        logging.info(f"    {ticker} flag OK : {nb_jours_consol}j de consol, range {consol_range_pct:.1f}%")
-
-        # Verifier baisse ATR (volatilite) pendant la consolidation
-        atr_avant_slice = df.iloc[max(consol_debut_idx - 5, -len(df)) : consol_debut_idx]
-        if len(atr_avant_slice) < 2:
-            return None
-        atr_avant   = float(atr_avant_slice["ATR"].mean())
-        atr_pendant = float(zone_consol["ATR"].mean())
-        if atr_avant == 0 or pd.isna(atr_avant) or pd.isna(atr_pendant):
-            return None
-        baisse_atr_pct = (1 - atr_pendant / atr_avant) * 100
-        if baisse_atr_pct < ATR_BAISSE_PCT:
-            logging.info(f"    {ticker} elimine : ATR pas assez baisse ({baisse_atr_pct:.1f}% < {ATR_BAISSE_PCT}%)")
-            return None
-
-        # Verifier baisse volume pendant la consolidation
-        vol_avant_slice = df.iloc[max(consol_debut_idx - 10, -len(df)) : consol_debut_idx]
-        if len(vol_avant_slice) < 3:
-            return None
-        vol_avant   = float(vol_avant_slice["Volume"].mean())
-        vol_pendant = float(zone_consol["Volume"].mean())
-        if vol_avant == 0 or pd.isna(vol_avant):
-            return None
-        baisse_vol_pct = (1 - vol_pendant / vol_avant) * 100
-        if baisse_vol_pct < VOL_BAISSE_PCT:
-            logging.info(f"    {ticker} elimine : volume pas assez baisse ({baisse_vol_pct:.1f}% < {VOL_BAISSE_PCT}%)")
-            return None
+        logging.info(f"    {ticker} flag OK : {nb_jours_consol}j, range={meilleure_consol['range_pct']:.1f}%, atr-{baisse_atr_pct:.0f}%, vol-{baisse_vol_pct:.0f}%")
 
         debut_imp = df.iloc[max(consol_debut_idx - IMPULSION_JOURS, -len(df)) : consol_debut_idx]
         if len(debut_imp) < 5:
@@ -380,5 +390,5 @@ def envoyer_email(setups, date_heure):
 # ============================================================
 
 if __name__ == "__main__":
-    logging.info("Bull Flag Scanner v6 demarre.")
+    logging.info("Bull Flag Scanner v7 demarre.")
     lancer_scan()

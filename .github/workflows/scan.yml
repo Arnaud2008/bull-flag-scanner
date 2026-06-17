@@ -1,1 +1,35 @@
+name: Bull Flag Scanner
 
+on:
+  schedule:
+    # Scan du lundi au vendredi a 13h45 UTC (9h45 ET — apres l'ouverture du marche)
+    - cron: "45 13 * * 1-5"
+    # Scan supplementaire a 20h45 UTC (16h45 ET — apres la cloture)
+    - cron: "45 20 * * 1-5"
+  workflow_dispatch:  # Permet de lancer manuellement depuis GitHub
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer les dependances
+        run: |
+          pip install yfinance pandas numpy
+
+      - name: Lancer le scan
+        env:
+          EMAIL_EXPEDITEUR: ${{ secrets.EMAIL_EXPEDITEUR }}
+          EMAIL_MOT_DE_PASSE: ${{ secrets.EMAIL_MOT_DE_PASSE }}
+          EMAIL_DESTINATAIRE: ${{ secrets.EMAIL_DESTINATAIRE }}
+        run: |
+          python bull_flag_scanner.py

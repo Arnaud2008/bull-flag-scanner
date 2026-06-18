@@ -1,7 +1,7 @@
 """
 Bull Flag Scanner — S&P 500 + NASDAQ 100 + Dow Jones
 Detecte : uptrend fort + consolidation + breakout avec volume
-Version 7 — Detection flag par fenetre glissante sur prix
+Version 8 — Analyse sur bougie fermee (hier = breakout, avant-hier = fin du flag)
 """
 
 import yfinance as yf
@@ -155,24 +155,38 @@ def analyser_stock(ticker):
         df["MA50"]  = df["Close"].rolling(50).mean()
         df["VolMA"] = df["Volume"].rolling(20).mean()
 
-        dernier     = df.iloc[-1]
-        prix_actuel = float(dernier["Close"])
-        vol_actuel  = float(dernier["Volume"])
-        vol_moy     = float(dernier["VolMA"])
-        ma20        = float(dernier["MA20"])
-        ma50        = float(dernier["MA50"])
+        # -----------------------------------------------------------
+        # LOGIQUE CORRIGEE — toujours analyser sur bougies FERMEES
+        #
+        #   iloc[-1] = aujourd'hui (bougie encore ouverte — ignoree)
+        #   iloc[-2] = hier        = bougie de BREAKOUT (fermee)
+        #   iloc[-3] = avant-hier  = derniere bougie du flag
+        #   iloc[-N] a iloc[-3]    = zone de consolidation
+        # -----------------------------------------------------------
 
-        if MA20_DESSUS and prix_actuel < ma20:
+        breakout     = df.iloc[-2]   # hier = bougie breakout fermee
+        avant_bo     = df.iloc[-3]   # avant-hier = fin du flag
+
+        prix_bo      = float(breakout["Close"])
+        prix_avant   = float(avant_bo["Close"])
+        vol_bo       = float(breakout["Volume"])
+        vol_moy      = float(df["VolMA"].iloc[-2])   # moyenne calculee a la cloture d'hier
+        ma20         = float(df["MA20"].iloc[-2])
+        ma50         = float(df["MA50"].iloc[-2])
+
+        # Filtre tendance sur la bougie de breakout
+        if MA20_DESSUS and prix_bo < ma20:
             return None
-        if MA50_DESSUS and prix_actuel < ma50:
+        if MA50_DESSUS and prix_bo < ma50:
             return None
 
-        hier = df.iloc[-2]
-        changement_pct = (prix_actuel - float(hier["Close"])) / float(hier["Close"]) * 100
+        # Breakout = bougie d'hier vs avant-hier
+        changement_pct = (prix_bo - prix_avant) / prix_avant * 100
         if changement_pct < BREAKOUT_PCT:
             return None
 
-        ratio_vol = vol_actuel / vol_moy if vol_moy > 0 else 0
+        # Volume du breakout
+        ratio_vol = vol_bo / vol_moy if vol_moy > 0 else 0
         if ratio_vol < VOL_MULT_BREAKOUT:
             return None
 
@@ -190,11 +204,10 @@ def analyser_stock(ticker):
 
         meilleure_consol = None
 
-        # Tester des fenetres de consolidation de longueur variable
         for duree in range(CONSOL_JOURS_MIN, min(CONSOL_JOURS_MAX + 1, len(df) - 15)):
-            # La fenetre se termine a iloc[-2] (hier, avant le breakout)
-            fin   = len(df) - 2          # index hier
-            debut = fin - duree          # index debut de la fenetre
+            # La fenetre se termine a iloc[-3] (avant-hier, AVANT la bougie breakout)
+            fin   = len(df) - 3          # avant-hier
+            debut = fin - duree
 
             if debut < 10:
                 break
@@ -286,7 +299,7 @@ def analyser_stock(ticker):
 
         return {
             "ticker"          : ticker,
-            "prix"            : round(prix_actuel, 2),
+            "prix"            : round(prix_bo, 2),
             "changement_pct"  : round(changement_pct, 2),
             "ratio_vol"       : round(ratio_vol, 2),
             "nb_jours_consol" : nb_jours_consol,
@@ -390,5 +403,5 @@ def envoyer_email(setups, date_heure):
 # ============================================================
 
 if __name__ == "__main__":
-    logging.info("Bull Flag Scanner v7 demarre.")
+    logging.info("Bull Flag Scanner v8 demarre.")
     lancer_scan()
